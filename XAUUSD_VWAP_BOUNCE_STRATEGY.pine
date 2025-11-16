@@ -1,0 +1,243 @@
+// This source code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © XAUUSD VWAP Bounce Strategy - Optimized for High Win Rate
+
+//@version=5
+strategy("XAUUSD VWAP Bounce Strategy [1-5M]", shorttitle="VWAP Bounce", overlay=true, initial_capital=10000, default_qty_type=strategy.percent_of_equity, default_qty_value=100, commission_type=strategy.commission.percent, commission_value=0.05, slippage=3)
+
+// ===========================================================================
+// STRATEGY CONCEPT
+// ===========================================================================
+// This strategy uses VWAP as dynamic support/resistance for mean reversion
+// trades, combined with trend filters for directional bias.
+//
+// LONG: Price bounces UP from VWAP in an uptrend
+// SHORT: Price bounces DOWN from VWAP in a downtrend
+//
+// Key Improvements over EMA Crossover:
+// 1. VWAP bounces are LEADING signals (not lagging like MA crossovers)
+// 2. Mean reversion has higher win rate than trend following on scalping TFs
+// 3. Better risk:reward ratio (1:2)
+// 4. More trades for statistical significance
+
+// ===========================================================================
+// INPUT PARAMETERS
+// ===========================================================================
+
+// VWAP Settings
+vwapSource = input.source(hlc3, "VWAP Source", group="VWAP Settings")
+vwapTouchDistance = input.float(0.5, "VWAP Touch Distance (x ATR)", minval=0.1, step=0.1, tooltip="How close price must get to VWAP to trigger", group="VWAP Settings")
+
+// SuperTrend Settings (Trend Filter)
+stAtrPeriod = input.int(10, "SuperTrend ATR Period", minval=1, group="SuperTrend Filter")
+stMultiplier = input.float(3.0, "SuperTrend Multiplier", minval=0.5, step=0.1, group="SuperTrend Filter")
+useTrendFilter = input.bool(true, "Use SuperTrend Filter", tooltip="Only trade in direction of SuperTrend", group="SuperTrend Filter")
+
+// RSI Settings (Momentum Filter)
+rsiLength = input.int(14, "RSI Length", minval=1, group="RSI Filter")
+rsiOverbought = input.int(60, "RSI Overbought", minval=50, maxval=80, tooltip="Sell when RSI above this on VWAP bounce", group="RSI Filter")
+rsiOversold = input.int(40, "RSI Oversold", minval=20, maxval=50, tooltip="Buy when RSI below this on VWAP bounce", group="RSI Filter")
+useRSIFilter = input.bool(true, "Use RSI Filter", group="RSI Filter")
+
+// ADX Settings (Trend Strength)
+adxLength = input.int(14, "ADX Length", minval=1, group="ADX Filter")
+adxThreshold = input.int(15, "ADX Minimum", minval=0, tooltip="Only trade when ADX above this (trending)", group="ADX Filter")
+useADXFilter = input.bool(false, "Use ADX Filter", tooltip="Disable for more trades", group="ADX Filter")
+
+// Risk Management
+atrLength = input.int(14, "ATR Length", minval=1, group="Risk Management")
+slMultiplier = input.float(1.5, "Stop Loss (x ATR)", minval=0.5, step=0.1, group="Risk Management")
+tpMultiplier = input.float(3.0, "Take Profit (x ATR)", minval=1.0, step=0.5, tooltip="1:2 Risk Reward = 3.0 with SL 1.5", group="Risk Management")
+useTrailingStop = input.bool(false, "Use Trailing Stop", group="Risk Management")
+trailOffset = input.float(2.0, "Trailing Stop Offset (x ATR)", minval=1.0, step=0.1, group="Risk Management")
+
+// Session Filter
+useSessionFilter = input.bool(false, "Use Session Filter", tooltip="Disable for more trades", group="Trading Sessions")
+londonSession = input.session("0800-1600", "London Session", group="Trading Sessions")
+newYorkSession = input.session("1300-2100", "New York Session", group="Trading Sessions")
+
+// Visual Settings
+showVWAP = input.bool(true, "Show VWAP", group="Visual")
+showSuperTrend = input.bool(true, "Show SuperTrend", group="Visual")
+showSignals = input.bool(true, "Show Entry Signals", group="Visual")
+showLabels = input.bool(true, "Show Entry Labels", group="Visual")
+
+// ===========================================================================
+// INDICATOR CALCULATIONS
+// ===========================================================================
+
+// VWAP
+vwapValue = ta.vwap(vwapSource)
+
+// SuperTrend
+atrST = ta.atr(stAtrPeriod)
+upperBand = hl2 + (stMultiplier * atrST)
+lowerBand = hl2 - (stMultiplier * atrST)
+
+var float superTrend = na
+var int direction = 1
+
+superTrend := direction == 1 ? lowerBand : upperBand
+
+if close > superTrend
+    direction := 1
+else if close < superTrend
+    direction := -1
+
+if direction != direction[1]
+    superTrend := direction == 1 ? lowerBand : upperBand
+
+isBullTrend = direction == 1
+isBearTrend = direction == -1
+
+// RSI
+rsi = ta.rsi(close, rsiLength)
+
+// ADX
+[diPlus, diMinus, adx] = ta.dmi(adxLength, adxLength)
+
+// ATR for Risk Management
+atrValue = ta.atr(atrLength)
+
+// ===========================================================================
+// ENTRY LOGIC - VWAP BOUNCE DETECTION
+// ===========================================================================
+
+// Session Filter
+inLondonSession = time(timeframe.period, londonSession)
+inNewYorkSession = time(timeframe.period, newYorkSession)
+inSession = not useSessionFilter or (inLondonSession or inNewYorkSession)
+
+// Check if price touched VWAP recently (within last 2 bars)
+vwapTouchThreshold = atrValue * vwapTouchDistance
+
+// LONG Setup: Price was below/at VWAP and bounced UP
+priceTouchedVWAPFromBelow = (low <= vwapValue + vwapTouchThreshold) and (low[1] <= vwapValue + vwapTouchThreshold)
+priceBouncedUp = close > vwapValue
+longVWAPBounce = priceTouchedVWAPFromBelow and priceBouncedUp
+
+// SHORT Setup: Price was above/at VWAP and bounced DOWN
+priceTouchedVWAPFromAbove = (high >= vwapValue - vwapTouchThreshold) and (high[1] >= vwapValue - vwapTouchThreshold)
+priceBouncedDown = close < vwapValue
+shortVWAPBounce = priceTouchedVWAPFromAbove and priceBouncedDown
+
+// Filters
+trendFilterLong = not useTrendFilter or isBullTrend
+trendFilterShort = not useTrendFilter or isBearTrend
+rsiFilterLong = not useRSIFilter or (rsi < rsiOversold)
+rsiFilterShort = not useRSIFilter or (rsi > rsiOverbought)
+adxFilter = not useADXFilter or (adx > adxThreshold)
+
+// Final Entry Conditions
+longCondition = longVWAPBounce and trendFilterLong and rsiFilterLong and adxFilter and inSession
+shortCondition = shortVWAPBounce and trendFilterShort and rsiFilterShort and adxFilter and inSession
+
+// ===========================================================================
+// RISK MANAGEMENT
+// ===========================================================================
+
+var float longSL = na
+var float longTP = na
+var float shortSL = na
+var float shortTP = na
+
+if longCondition and strategy.position_size == 0
+    longSL := close - (atrValue * slMultiplier)
+    longTP := close + (atrValue * tpMultiplier)
+
+if shortCondition and strategy.position_size == 0
+    shortSL := close + (atrValue * slMultiplier)
+    shortTP := close - (atrValue * tpMultiplier)
+
+// ===========================================================================
+// STRATEGY EXECUTION
+// ===========================================================================
+
+if longCondition
+    strategy.entry("Long", strategy.long)
+    if useTrailingStop
+        strategy.exit("Exit Long", "Long", stop=longSL, limit=longTP, trail_offset=atrValue * trailOffset, trail_points=atrValue * trailOffset)
+    else
+        strategy.exit("Exit Long", "Long", stop=longSL, limit=longTP)
+
+if shortCondition
+    strategy.entry("Short", strategy.short)
+    if useTrailingStop
+        strategy.exit("Exit Short", "Short", stop=shortSL, limit=shortTP, trail_offset=atrValue * trailOffset, trail_points=atrValue * trailOffset)
+    else
+        strategy.exit("Exit Short", "Short", stop=shortSL, limit=shortTP)
+
+// ===========================================================================
+// VISUAL ELEMENTS
+// ===========================================================================
+
+// Plot VWAP
+plot(showVWAP ? vwapValue : na, "VWAP", color=color.new(color.yellow, 0), linewidth=2)
+
+// VWAP Bands (touch zones)
+upperVWAPBand = vwapValue + vwapTouchThreshold
+lowerVWAPBand = vwapValue - vwapTouchThreshold
+plot(showVWAP ? upperVWAPBand : na, "VWAP Upper Band", color=color.new(color.yellow, 80), linewidth=1)
+plot(showVWAP ? lowerVWAPBand : na, "VWAP Lower Band", color=color.new(color.yellow, 80), linewidth=1)
+
+// Plot SuperTrend
+stColor = isBullTrend ? color.new(color.green, 0) : color.new(color.red, 0)
+plot(showSuperTrend ? superTrend : na, "SuperTrend", color=stColor, linewidth=2)
+
+// Plot Entry Signals
+plotshape(showSignals and longCondition, "Long Signal", shape.triangleup, location.belowbar, color.new(color.lime, 0), size=size.normal)
+plotshape(showSignals and shortCondition, "Short Signal", shape.triangledown, location.abovebar, color.new(color.red, 0), size=size.normal)
+
+// Entry Labels
+if showLabels and longCondition
+    label.new(bar_index, low, "LONG\nEntry: " + str.tostring(close, "#.##") + "\nSL: " + str.tostring(longSL, "#.##") + "\nTP: " + str.tostring(longTP, "#.##") + "\nRR: 1:" + str.tostring(tpMultiplier/slMultiplier, "#.#"), color=color.new(color.green, 80), textcolor=color.white, style=label.style_label_up, size=size.small)
+
+if showLabels and shortCondition
+    label.new(bar_index, high, "SHORT\nEntry: " + str.tostring(close, "#.##") + "\nSL: " + str.tostring(shortSL, "#.##") + "\nTP: " + str.tostring(shortTP, "#.##") + "\nRR: 1:" + str.tostring(tpMultiplier/slMultiplier, "#.#"), color=color.new(color.red, 80), textcolor=color.white, style=label.style_label_down, size=size.small)
+
+// ===========================================================================
+// PERFORMANCE DASHBOARD
+// ===========================================================================
+
+var table dashboard = table.new(position.top_right, 2, 10, bgcolor=color.new(color.black, 85), border_width=1, border_color=color.gray)
+
+if barstate.islast
+    table.cell(dashboard, 0, 0, "VWAP Bounce Strategy", text_color=color.white, text_size=size.normal, bgcolor=color.new(color.blue, 70))
+    table.merge_cells(dashboard, 0, 0, 1, 0)
+
+    winRate = strategy.closedtrades > 0 ? (strategy.wintrades / strategy.closedtrades) * 100 : 0
+    profitFactor = strategy.grossloss > 0 ? strategy.grossprofit / strategy.grossloss : 0
+
+    table.cell(dashboard, 0, 1, "Total Trades", text_color=color.gray, text_size=size.small)
+    table.cell(dashboard, 1, 1, str.tostring(strategy.closedtrades), text_color=color.white, text_size=size.small)
+
+    table.cell(dashboard, 0, 2, "Win Rate", text_color=color.gray, text_size=size.small)
+    table.cell(dashboard, 1, 2, str.tostring(winRate, "#.##") + "%", text_color=winRate >= 50 ? color.lime : color.red, text_size=size.small)
+
+    table.cell(dashboard, 0, 3, "Profit Factor", text_color=color.gray, text_size=size.small)
+    table.cell(dashboard, 1, 3, str.tostring(profitFactor, "#.##"), text_color=profitFactor >= 1.5 ? color.lime : profitFactor >= 1 ? color.orange : color.red, text_size=size.small)
+
+    table.cell(dashboard, 0, 4, "Net Profit", text_color=color.gray, text_size=size.small)
+    table.cell(dashboard, 1, 4, "$" + str.tostring(strategy.netprofit, "#.##"), text_color=strategy.netprofit >= 0 ? color.lime : color.red, text_size=size.small)
+
+    table.cell(dashboard, 0, 5, "Winners", text_color=color.gray, text_size=size.small)
+    table.cell(dashboard, 1, 5, str.tostring(strategy.wintrades), text_color=color.lime, text_size=size.small)
+
+    table.cell(dashboard, 0, 6, "Losers", text_color=color.gray, text_size=size.small)
+    table.cell(dashboard, 1, 6, str.tostring(strategy.losstrades), text_color=color.red, text_size=size.small)
+
+    table.cell(dashboard, 0, 7, "Max DD", text_color=color.gray, text_size=size.small)
+    table.cell(dashboard, 1, 7, "$" + str.tostring(strategy.max_drawdown, "#.##"), text_color=color.red, text_size=size.small)
+
+    table.cell(dashboard, 0, 8, "RSI", text_color=color.gray, text_size=size.small)
+    rsiColor = rsi > 70 ? color.red : rsi < 30 ? color.lime : color.white
+    table.cell(dashboard, 1, 8, str.tostring(rsi, "#.##"), text_color=rsiColor, text_size=size.small)
+
+    table.cell(dashboard, 0, 9, "ADX", text_color=color.gray, text_size=size.small)
+    table.cell(dashboard, 1, 9, str.tostring(adx, "#.##"), text_color=adx > adxThreshold ? color.lime : color.orange, text_size=size.small)
+
+// ===========================================================================
+// ALERTS
+// ===========================================================================
+
+alertcondition(longCondition, title="VWAP Bounce Long", message="XAUUSD VWAP Bounce LONG")
+alertcondition(shortCondition, title="VWAP Bounce Short", message="XAUUSD VWAP Bounce SHORT")
