@@ -2,7 +2,7 @@
 // © XAUUSD VWAP Bounce Strategy - Optimized for High Win Rate
 
 //@version=5
-strategy("XAUUSD VWAP Bounce Strategy [1-5M]", shorttitle="VWAP Bounce", overlay=true, initial_capital=10000, default_qty_type=strategy.percent_of_equity, default_qty_value=100, commission_type=strategy.commission.percent, commission_value=0.05, slippage=3)
+strategy("XAUUSD VWAP Bounce Strategy [1-5M]", shorttitle="VWAP Bounce", overlay=true, initial_capital=10000, default_qty_type=strategy.percent_of_equity, default_qty_value=100, commission_type=strategy.commission.percent, commission_value=0.05, slippage=3, calc_on_every_tick=true)
 
 // ===========================================================================
 // STRATEGY CONCEPT
@@ -103,8 +103,8 @@ atrValue = ta.atr(atrLength)
 // ===========================================================================
 
 // Session Filter
-inLondonSession = time(timeframe.period, londonSession)
-inNewYorkSession = time(timeframe.period, newYorkSession)
+inLondonSession = not na(time(timeframe.period, londonSession))
+inNewYorkSession = not na(time(timeframe.period, newYorkSession))
 inSession = not useSessionFilter or (inLondonSession or inNewYorkSession)
 
 // Check if price touched VWAP recently (within last 2 bars)
@@ -238,6 +238,6 @@ if barstate.islast
 // ===========================================================================
 // ALERTS
 // ===========================================================================
-
-alertcondition(longCondition, title="VWAP Bounce Long", message="XAUUSD VWAP Bounce LONG")
-alertcondition(shortCondition, title="VWAP Bounce Short", message="XAUUSD VWAP Bounce SHORT")
+// Note: For strategy alerts, use TradingView's built-in "Create Alert" on the
+// strategy itself. alertcondition() does not work inside strategies.
+// Right-click chart > Add Alert > Select this strategy > Choose alert conditions

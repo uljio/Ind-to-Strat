@@ -2,7 +2,7 @@
 // © XAUUSD Aggressive Scalper - High Frequency Mean Reversion
 
 //@version=5
-strategy("XAUUSD Aggressive Scalper [1-5M]", shorttitle="Aggressive Scalper", overlay=true, initial_capital=10000, default_qty_type=strategy.percent_of_equity, default_qty_value=100, commission_type=strategy.commission.percent, commission_value=0.05, slippage=3)
+strategy("XAUUSD Aggressive Scalper [1-5M]", shorttitle="Aggressive Scalper", overlay=true, initial_capital=10000, default_qty_type=strategy.percent_of_equity, default_qty_value=100, commission_type=strategy.commission.percent, commission_value=0.05, slippage=3, calc_on_every_tick=true)
 
 // ===========================================================================
 // STRATEGY CONCEPT
