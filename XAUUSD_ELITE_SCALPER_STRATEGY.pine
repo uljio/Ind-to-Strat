@@ -27,8 +27,7 @@ strategy("XAUUSD Elite Scalper [1-5M]", shorttitle="XAU Elite Scalper", overlay=
 // ═══════════════════════════════════════════════════════════════════════
 
 // === Strategy Mode ===
-strategyMode = input.string("Strategy", "Mode", options=["Indicator Only", "Strategy"],
-              tooltip="Indicator Only = signals without trades, Strategy = full backtesting", group="🎯 Strategy Settings")
+strategyMode = input.string("Strategy", "Mode", options=["Indicator Only", "Strategy"], tooltip="Indicator Only = signals without trades, Strategy = full backtesting", group="🎯 Strategy Settings")
 
 // === EMA Settings ===
 emaFastLength = input.int(9, "Fast EMA Length", minval=1, group="📈 EMA Crossover")
@@ -46,16 +45,13 @@ vwapSource = input.source(hlc3, "VWAP Source", group="💎 VWAP")
 
 // === RSI Settings ===
 rsiLength = input.int(14, "RSI Length", minval=1, group="📊 RSI Filter")
-rsiBuyThreshold = input.int(40, "RSI Buy Threshold (>)", minval=0, maxval=100,
-                   tooltip="Only buy when RSI is above this level", group="📊 RSI Filter")
-rsiSellThreshold = input.int(60, "RSI Sell Threshold (<)", minval=0, maxval=100,
-                    tooltip="Only sell when RSI is below this level", group="📊 RSI Filter")
+rsiBuyThreshold = input.int(40, "RSI Buy Threshold (>)", minval=0, maxval=100, tooltip="Only buy when RSI is above this level", group="📊 RSI Filter")
+rsiSellThreshold = input.int(60, "RSI Sell Threshold (<)", minval=0, maxval=100, tooltip="Only sell when RSI is below this level", group="📊 RSI Filter")
 useRSIFilter = input.bool(true, "Use RSI Filter", group="📊 RSI Filter")
 
 // === ADX Settings ===
 adxLength = input.int(14, "ADX Length", minval=1, group="💪 ADX Trend Filter")
-adxThreshold = input.int(20, "ADX Threshold", minval=0,
-              tooltip="Only trade when ADX is above this level (trending market)", group="💪 ADX Trend Filter")
+adxThreshold = input.int(20, "ADX Threshold", minval=0, tooltip="Only trade when ADX is above this level (trending market)", group="💪 ADX Trend Filter")
 useADXFilter = input.bool(true, "Use ADX Filter", group="💪 ADX Trend Filter")
 
 // === ATR Risk Management ===
@@ -64,10 +60,8 @@ slMultiplier = input.float(1.5, "Stop Loss (x ATR)", minval=0.5, step=0.1, group
 tpMultiplier = input.float(2.0, "Take Profit (x ATR)", minval=0.5, step=0.1, group="🎲 Risk Management (ATR)")
 
 // === VWAP Bias Filter ===
-useVWAPBias = input.bool(true, "Use VWAP Bias Filter",
-             tooltip="Long only above VWAP, Short only below VWAP", group="💎 VWAP")
-vwapATRBuffer = input.float(1.0, "VWAP ATR Buffer", minval=0, step=0.1,
-                tooltip="Allow entries within X ATR of VWAP", group="💎 VWAP")
+useVWAPBias = input.bool(true, "Use VWAP Bias Filter", tooltip="Long only above VWAP, Short only below VWAP", group="💎 VWAP")
+vwapATRBuffer = input.float(1.0, "VWAP ATR Buffer", minval=0, step=0.1, tooltip="Allow entries within X ATR of VWAP", group="💎 VWAP")
 
 // === Session Filter ===
 useSessionFilter = input.bool(true, "Use Session Filter", group="🕐 Trading Sessions")
@@ -147,20 +141,12 @@ rsiBearish = not useRSIFilter or (rsi < rsiSellThreshold)
 adxTrending = not useADXFilter or (adx > adxThreshold)
 
 // === LONG ENTRY CONDITIONS ===
-longCondition = emaCrossUp and          // EMA bullish crossover
-                isBullishST and          // SuperTrend bullish
-                vwapBullishBias and      // Price above VWAP (or within buffer)
-                rsiBullish and           // RSI confirms upward momentum
-                adxTrending and          // Market is trending
-                inSession                // Within trading session
+// EMA bullish crossover + SuperTrend bullish + Price above VWAP + RSI confirms momentum + Market trending + Valid session
+longCondition = emaCrossUp and isBullishST and vwapBullishBias and rsiBullish and adxTrending and inSession
 
 // === SHORT ENTRY CONDITIONS ===
-shortCondition = emaCrossDown and        // EMA bearish crossover
-                 isBearishST and         // SuperTrend bearish
-                 vwapBearishBias and     // Price below VWAP (or within buffer)
-                 rsiBearish and          // RSI confirms downward momentum
-                 adxTrending and         // Market is trending
-                 inSession               // Within trading session
+// EMA bearish crossover + SuperTrend bearish + Price below VWAP + RSI confirms momentum + Market trending + Valid session
+shortCondition = emaCrossDown and isBearishST and vwapBearishBias and rsiBearish and adxTrending and inSession
 
 // ═══════════════════════════════════════════════════════════════════════
 // 🎲 RISK MANAGEMENT
@@ -333,11 +319,9 @@ if showDashboard
 // 🔔 ALERTS
 // ═══════════════════════════════════════════════════════════════════════
 
-alertcondition(longCondition, title="🟢 Long Signal",
-              message="XAUUSD Elite Scalper: LONG signal detected!\nEntry: {{close}}\nSL: {{close}} - ATR\nTP: {{close}} + ATR")
+alertcondition(longCondition, title="🟢 Long Signal", message="XAUUSD Elite Scalper: LONG signal detected!\nEntry: {{close}}\nSL: {{close}} - ATR\nTP: {{close}} + ATR")
 
-alertcondition(shortCondition, title="🔴 Short Signal",
-              message="XAUUSD Elite Scalper: SHORT signal detected!\nEntry: {{close}}\nSL: {{close}} + ATR\nTP: {{close}} - ATR")
+alertcondition(shortCondition, title="🔴 Short Signal", message="XAUUSD Elite Scalper: SHORT signal detected!\nEntry: {{close}}\nSL: {{close}} + ATR\nTP: {{close}} - ATR")
 
 // ═══════════════════════════════════════════════════════════════════════
 // 📝 NOTES & OPTIMIZATION TIPS

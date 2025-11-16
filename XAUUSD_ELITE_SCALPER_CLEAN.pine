@@ -1,0 +1,258 @@
+// This source code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © XAUUSD Elite Scalper - Multi-Confluence Non-Repainting Strategy
+
+//@version=5
+strategy("XAUUSD Elite Scalper [1-5M]", shorttitle="XAU Elite Scalper", overlay=true, initial_capital=10000, default_qty_type=strategy.percent_of_equity, default_qty_value=100, commission_type=strategy.commission.percent, commission_value=0.05, slippage=3)
+
+// ===========================================================================
+// STRATEGY DESCRIPTION
+// ===========================================================================
+// This strategy combines the TOP 6 non-repainting indicators for XAUUSD scalping:
+// 1. VWAP - Institutional price level (bias & support/resistance)
+// 2. EMA 9/21 Crossover - Fast entry trigger
+// 3. SuperTrend - Trend direction confirmation
+// 4. ATR - Dynamic volatility-based SL/TP
+// 5. RSI - Momentum filter
+// 6. ADX - Trend strength filter
+//
+// Optimized for: 1M, 3M, 5M timeframes
+// Best Asset: XAUUSD (Gold)
+// Best Sessions: London & New York overlap (13:00-17:00 GMT)
+
+// ===========================================================================
+// INPUT PARAMETERS
+// ===========================================================================
+
+// Strategy Mode
+strategyMode = input.string("Strategy", "Mode", options=["Indicator Only", "Strategy"], tooltip="Indicator Only = signals without trades, Strategy = full backtesting", group="Strategy Settings")
+
+// EMA Settings
+emaFastLength = input.int(9, "Fast EMA Length", minval=1, group="EMA Crossover")
+emaSlowLength = input.int(21, "Slow EMA Length", minval=1, group="EMA Crossover")
+showEMAs = input.bool(true, "Show EMAs", group="EMA Crossover")
+
+// SuperTrend Settings
+stAtrPeriod = input.int(10, "ATR Period", minval=1, group="SuperTrend")
+stMultiplier = input.float(3.0, "ATR Multiplier", minval=0.5, step=0.1, group="SuperTrend")
+showSuperTrend = input.bool(true, "Show SuperTrend", group="SuperTrend")
+
+// VWAP Settings
+showVWAP = input.bool(true, "Show VWAP", group="VWAP")
+vwapSource = input.source(hlc3, "VWAP Source", group="VWAP")
+
+// RSI Settings
+rsiLength = input.int(14, "RSI Length", minval=1, group="RSI Filter")
+rsiBuyThreshold = input.int(40, "RSI Buy Threshold", minval=0, maxval=100, tooltip="Only buy when RSI is above this level", group="RSI Filter")
+rsiSellThreshold = input.int(60, "RSI Sell Threshold", minval=0, maxval=100, tooltip="Only sell when RSI is below this level", group="RSI Filter")
+useRSIFilter = input.bool(true, "Use RSI Filter", group="RSI Filter")
+
+// ADX Settings
+adxLength = input.int(14, "ADX Length", minval=1, group="ADX Trend Filter")
+adxThreshold = input.int(20, "ADX Threshold", minval=0, tooltip="Only trade when ADX is above this level", group="ADX Trend Filter")
+useADXFilter = input.bool(true, "Use ADX Filter", group="ADX Trend Filter")
+
+// ATR Risk Management
+atrLength = input.int(14, "ATR Length", minval=1, group="Risk Management")
+slMultiplier = input.float(1.5, "Stop Loss (x ATR)", minval=0.5, step=0.1, group="Risk Management")
+tpMultiplier = input.float(2.0, "Take Profit (x ATR)", minval=0.5, step=0.1, group="Risk Management")
+
+// VWAP Bias Filter
+useVWAPBias = input.bool(true, "Use VWAP Bias Filter", tooltip="Long only above VWAP, Short only below VWAP", group="VWAP")
+vwapATRBuffer = input.float(1.0, "VWAP ATR Buffer", minval=0, step=0.1, tooltip="Allow entries within X ATR of VWAP", group="VWAP")
+
+// Session Filter
+useSessionFilter = input.bool(true, "Use Session Filter", group="Trading Sessions")
+londonSession = input.session("0800-1600", "London Session", group="Trading Sessions")
+newYorkSession = input.session("1300-2100", "New York Session", group="Trading Sessions")
+
+// Visual Settings
+showSignals = input.bool(true, "Show Buy/Sell Signals", group="Visual Settings")
+showLabels = input.bool(true, "Show Entry Labels", group="Visual Settings")
+showStopLevels = input.bool(true, "Show SL/TP Levels", group="Visual Settings")
+showDashboard = input.bool(true, "Show Performance Dashboard", group="Visual Settings")
+
+// ===========================================================================
+// INDICATOR CALCULATIONS
+// ===========================================================================
+
+// EMA Calculation
+emaFast = ta.ema(close, emaFastLength)
+emaSlow = ta.ema(close, emaSlowLength)
+emaCrossUp = ta.crossover(emaFast, emaSlow)
+emaCrossDown = ta.crossunder(emaFast, emaSlow)
+
+// VWAP Calculation
+vwapValue = ta.vwap(vwapSource)
+
+// SuperTrend Calculation
+atr = ta.atr(stAtrPeriod)
+upperBand = hl2 + (stMultiplier * atr)
+lowerBand = hl2 - (stMultiplier * atr)
+
+var float superTrend = na
+var int direction = 1
+
+superTrend := direction == 1 ? lowerBand : upperBand
+
+if close > superTrend
+    direction := 1
+else if close < superTrend
+    direction := -1
+
+if direction != direction[1]
+    superTrend := direction == 1 ? lowerBand : upperBand
+
+isBullishST = direction == 1
+isBearishST = direction == -1
+
+// RSI Calculation
+rsi = ta.rsi(close, rsiLength)
+
+// ADX Calculation
+[diPlus, diMinus, adx] = ta.dmi(adxLength, adxLength)
+
+// ATR for Risk Management
+atrValue = ta.atr(atrLength)
+
+// ===========================================================================
+// ENTRY CONDITIONS
+// ===========================================================================
+
+// Session Filter
+inLondonSession = time(timeframe.period, londonSession)
+inNewYorkSession = time(timeframe.period, newYorkSession)
+inSession = not useSessionFilter or (inLondonSession or inNewYorkSession)
+
+// VWAP Bias Check
+priceAboveVWAP = close > vwapValue - (atrValue * vwapATRBuffer)
+priceBelowVWAP = close < vwapValue + (atrValue * vwapATRBuffer)
+
+vwapBullishBias = not useVWAPBias or priceAboveVWAP
+vwapBearishBias = not useVWAPBias or priceBelowVWAP
+
+// RSI Filter
+rsiBullish = not useRSIFilter or (rsi > rsiBuyThreshold)
+rsiBearish = not useRSIFilter or (rsi < rsiSellThreshold)
+
+// ADX Filter
+adxTrending = not useADXFilter or (adx > adxThreshold)
+
+// LONG ENTRY CONDITIONS
+longCondition = emaCrossUp and isBullishST and vwapBullishBias and rsiBullish and adxTrending and inSession
+
+// SHORT ENTRY CONDITIONS
+shortCondition = emaCrossDown and isBearishST and vwapBearishBias and rsiBearish and adxTrending and inSession
+
+// ===========================================================================
+// RISK MANAGEMENT
+// ===========================================================================
+
+var float entryPrice = na
+var float stopLoss = na
+var float takeProfit = na
+
+if longCondition and strategy.position_size == 0
+    entryPrice := close
+    stopLoss := entryPrice - (atrValue * slMultiplier)
+    takeProfit := entryPrice + (atrValue * tpMultiplier)
+
+if shortCondition and strategy.position_size == 0
+    entryPrice := close
+    stopLoss := entryPrice + (atrValue * slMultiplier)
+    takeProfit := entryPrice - (atrValue * tpMultiplier)
+
+// ===========================================================================
+// STRATEGY EXECUTION
+// ===========================================================================
+
+if strategyMode == "Strategy"
+    if longCondition
+        strategy.entry("Long", strategy.long)
+        strategy.exit("Exit Long", "Long", stop=stopLoss, limit=takeProfit)
+    if shortCondition
+        strategy.entry("Short", strategy.short)
+        strategy.exit("Exit Short", "Short", stop=stopLoss, limit=takeProfit)
+
+// ===========================================================================
+// VISUAL ELEMENTS
+// ===========================================================================
+
+// Plot EMAs
+plot(showEMAs ? emaFast : na, "Fast EMA", color=color.new(color.aqua, 0), linewidth=2)
+plot(showEMAs ? emaSlow : na, "Slow EMA", color=color.new(color.orange, 0), linewidth=2)
+
+// Plot SuperTrend
+stColor = isBullishST ? color.new(color.green, 0) : color.new(color.red, 0)
+plot(showSuperTrend ? superTrend : na, "SuperTrend", color=stColor, linewidth=2, style=plot.style_line)
+
+// Plot VWAP
+plot(showVWAP ? vwapValue : na, "VWAP", color=color.new(color.yellow, 0), linewidth=2, style=plot.style_circles)
+
+// Plot Buy/Sell Signals
+plotshape(showSignals and longCondition, "Buy Signal", shape.triangleup, location.belowbar, color.new(color.lime, 0), size=size.normal)
+plotshape(showSignals and shortCondition, "Sell Signal", shape.triangledown, location.abovebar, color.new(color.red, 0), size=size.normal)
+
+// Entry Labels with Details
+if showLabels and longCondition
+    label.new(bar_index, low, "LONG\nEntry: " + str.tostring(close, "#.##") + "\nSL: " + str.tostring(close - (atrValue * slMultiplier), "#.##") + "\nTP: " + str.tostring(close + (atrValue * tpMultiplier), "#.##") + "\nRR 1:" + str.tostring(tpMultiplier/slMultiplier, "#.#"), color=color.new(color.green, 80), textcolor=color.white, style=label.style_label_up, size=size.small)
+
+if showLabels and shortCondition
+    label.new(bar_index, high, "SHORT\nEntry: " + str.tostring(close, "#.##") + "\nSL: " + str.tostring(close + (atrValue * slMultiplier), "#.##") + "\nTP: " + str.tostring(close - (atrValue * tpMultiplier), "#.##") + "\nRR 1:" + str.tostring(tpMultiplier/slMultiplier, "#.#"), color=color.new(color.red, 80), textcolor=color.white, style=label.style_label_down, size=size.small)
+
+// Plot Stop Loss and Take Profit Levels
+var line slLine = na
+var line tpLine = na
+
+if showStopLevels and strategy.position_size != 0
+    if not na(slLine)
+        line.delete(slLine)
+    if not na(tpLine)
+        line.delete(tpLine)
+    slLine := line.new(bar_index, stopLoss, bar_index + 20, stopLoss, color=color.new(color.red, 50), width=2, style=line.style_dashed)
+    tpLine := line.new(bar_index, takeProfit, bar_index + 20, takeProfit, color=color.new(color.green, 50), width=2, style=line.style_dashed)
+
+// ===========================================================================
+// PERFORMANCE DASHBOARD
+// ===========================================================================
+
+if showDashboard
+    var table dashboard = table.new(position.top_right, 2, 12, bgcolor=color.new(color.black, 85), border_width=2, border_color=color.gray)
+    if barstate.islast
+        table.cell(dashboard, 0, 0, "XAUUSD Elite Scalper", text_color=color.white, text_size=size.normal, bgcolor=color.new(color.blue, 70))
+        table.merge_cells(dashboard, 0, 0, 1, 0)
+        winRate = strategy.wintrades / (strategy.wintrades + strategy.losstrades) * 100
+        profitFactor = strategy.grossprofit / math.max(strategy.grossloss, 1)
+        avgWin = strategy.grossprofit / math.max(strategy.wintrades, 1)
+        avgLoss = strategy.grossloss / math.max(strategy.losstrades, 1)
+        table.cell(dashboard, 0, 1, "Total Trades", text_color=color.gray, text_size=size.small)
+        table.cell(dashboard, 1, 1, str.tostring(strategy.closedtrades), text_color=color.white, text_size=size.small)
+        table.cell(dashboard, 0, 2, "Win Rate", text_color=color.gray, text_size=size.small)
+        table.cell(dashboard, 1, 2, str.tostring(winRate, "#.##") + "%", text_color=winRate >= 50 ? color.lime : color.red, text_size=size.small)
+        table.cell(dashboard, 0, 3, "Profit Factor", text_color=color.gray, text_size=size.small)
+        table.cell(dashboard, 1, 3, str.tostring(profitFactor, "#.##"), text_color=profitFactor >= 1 ? color.lime : color.red, text_size=size.small)
+        table.cell(dashboard, 0, 4, "Net Profit", text_color=color.gray, text_size=size.small)
+        table.cell(dashboard, 1, 4, "$" + str.tostring(strategy.netprofit, "#,###.##"), text_color=strategy.netprofit >= 0 ? color.lime : color.red, text_size=size.small)
+        table.cell(dashboard, 0, 5, "Winning Trades", text_color=color.gray, text_size=size.small)
+        table.cell(dashboard, 1, 5, str.tostring(strategy.wintrades), text_color=color.lime, text_size=size.small)
+        table.cell(dashboard, 0, 6, "Losing Trades", text_color=color.gray, text_size=size.small)
+        table.cell(dashboard, 1, 6, str.tostring(strategy.losstrades), text_color=color.red, text_size=size.small)
+        table.cell(dashboard, 0, 7, "Avg Win", text_color=color.gray, text_size=size.small)
+        table.cell(dashboard, 1, 7, "$" + str.tostring(avgWin, "#.##"), text_color=color.lime, text_size=size.small)
+        table.cell(dashboard, 0, 8, "Avg Loss", text_color=color.gray, text_size=size.small)
+        table.cell(dashboard, 1, 8, "$" + str.tostring(avgLoss, "#.##"), text_color=color.red, text_size=size.small)
+        table.cell(dashboard, 0, 9, "Position", text_color=color.gray, text_size=size.small)
+        posText = strategy.position_size > 0 ? "LONG" : strategy.position_size < 0 ? "SHORT" : "FLAT"
+        posColor = strategy.position_size > 0 ? color.lime : strategy.position_size < 0 ? color.red : color.gray
+        table.cell(dashboard, 1, 9, posText, text_color=posColor, text_size=size.small)
+        table.cell(dashboard, 0, 10, "ADX", text_color=color.gray, text_size=size.small)
+        table.cell(dashboard, 1, 10, str.tostring(adx, "#.##"), text_color=adx > adxThreshold ? color.lime : color.orange, text_size=size.small)
+        table.cell(dashboard, 0, 11, "RSI", text_color=color.gray, text_size=size.small)
+        rsiColor = rsi > 70 ? color.red : rsi < 30 ? color.lime : color.white
+        table.cell(dashboard, 1, 11, str.tostring(rsi, "#.##"), text_color=rsiColor, text_size=size.small)
+
+// ===========================================================================
+// ALERTS
+// ===========================================================================
+
+alertcondition(longCondition, title="Long Signal", message="XAUUSD Elite Scalper LONG signal detected")
+alertcondition(shortCondition, title="Short Signal", message="XAUUSD Elite Scalper SHORT signal detected")
