@@ -141,20 +141,12 @@ rsiBearish = not useRSIFilter or (rsi < rsiSellThreshold)
 adxTrending = not useADXFilter or (adx > adxThreshold)
 
 // === LONG ENTRY CONDITIONS ===
-longCondition = emaCrossUp and          // EMA bullish crossover
-                isBullishST and          // SuperTrend bullish
-                vwapBullishBias and      // Price above VWAP (or within buffer)
-                rsiBullish and           // RSI confirms upward momentum
-                adxTrending and          // Market is trending
-                inSession                // Within trading session
+// EMA bullish crossover + SuperTrend bullish + Price above VWAP + RSI confirms momentum + Market trending + Valid session
+longCondition = emaCrossUp and isBullishST and vwapBullishBias and rsiBullish and adxTrending and inSession
 
 // === SHORT ENTRY CONDITIONS ===
-shortCondition = emaCrossDown and        // EMA bearish crossover
-                 isBearishST and         // SuperTrend bearish
-                 vwapBearishBias and     // Price below VWAP (or within buffer)
-                 rsiBearish and          // RSI confirms downward momentum
-                 adxTrending and         // Market is trending
-                 inSession               // Within trading session
+// EMA bearish crossover + SuperTrend bearish + Price below VWAP + RSI confirms momentum + Market trending + Valid session
+shortCondition = emaCrossDown and isBearishST and vwapBearishBias and rsiBearish and adxTrending and inSession
 
 // ═══════════════════════════════════════════════════════════════════════
 // 🎲 RISK MANAGEMENT
