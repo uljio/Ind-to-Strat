@@ -1,0 +1,498 @@
+// This Pine Script™ is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © Converted from EA-AK47Hybrid by JonusNattapong
+// Strategy: AK47 Hybrid - Multi-indicator scalping strategy with RSI, MA crossover, and BB breakout signals
+
+//@version=6
+strategy("AK47 Hybrid Strategy", overlay=true, pyramiding=0, default_qty_type=strategy.percent_of_equity, default_qty_value=100, initial_capital=10000, commission_type=strategy.commission.percent, commission_value=0.02, slippage=2)
+
+// ══════════════════════════════════════════════════════════════════════════════
+// INDICATOR SETTINGS
+// ══════════════════════════════════════════════════════════════════════════════
+
+// RSI Settings
+rsiGroup = "RSI Settings"
+rsiPeriod = input.int(21, "RSI Period", minval=2, group=rsiGroup)
+rsiOverbought = input.int(80, "RSI Overbought", minval=50, maxval=100, group=rsiGroup)
+rsiOversold = input.int(20, "RSI Oversold", minval=0, maxval=50, group=rsiGroup)
+useRsiSignal = input.bool(true, "Use RSI Signal", group=rsiGroup)
+
+// EMA Trend Filter
+emaGroup = "EMA Trend Filter"
+useEmaFilter = input.bool(false, "Enable EMA Trend Filter", group=emaGroup)
+emaPeriod = input.int(50, "EMA Period", minval=1, group=emaGroup)
+
+// ATR Volatility Filter
+atrGroup = "ATR Volatility Filter"
+useAtrFilter = input.bool(false, "Enable ATR Filter", group=atrGroup)
+atrPeriod = input.int(14, "ATR Period", minval=1, group=atrGroup)
+atrMinThreshold = input.float(0.5, "Min ATR Threshold", minval=0.0, step=0.1, group=atrGroup)
+
+// MACD Momentum Filter
+macdGroup = "MACD Momentum Filter"
+useMacdFilter = input.bool(false, "Enable MACD Filter", group=macdGroup)
+macdFast = input.int(12, "MACD Fast", minval=1, group=macdGroup)
+macdSlow = input.int(26, "MACD Slow", minval=1, group=macdGroup)
+macdSignal = input.int(9, "MACD Signal", minval=1, group=macdGroup)
+
+// Stochastic Oscillator Filter
+stochGroup = "Stochastic Filter"
+useStochFilter = input.bool(false, "Enable Stochastic Filter", group=stochGroup)
+stochK = input.int(5, "Stoch %K", minval=1, group=stochGroup)
+stochD = input.int(3, "Stoch %D", minval=1, group=stochGroup)
+stochSlowing = input.int(3, "Stoch Slowing", minval=1, group=stochGroup)
+stochOverbought = input.int(80, "Stoch Overbought", minval=50, maxval=100, group=stochGroup)
+stochOversold = input.int(20, "Stoch Oversold", minval=0, maxval=50, group=stochGroup)
+
+// MA Crossover Settings
+maGroup = "MA Crossover"
+useMaCrossover = input.bool(true, "Enable MA Crossover Signal", group=maGroup)
+maFastPeriod = input.int(10, "Fast MA Period", minval=1, group=maGroup)
+maSlowPeriod = input.int(20, "Slow MA Period", minval=1, group=maGroup)
+maType = input.string("SMA", "MA Type", options=["SMA", "EMA"], group=maGroup)
+
+// Bollinger Bands Settings
+bbGroup = "Bollinger Bands"
+useBbBreakout = input.bool(true, "Enable BB Breakout Signal", group=bbGroup)
+bbPeriod = input.int(20, "BB Period", minval=1, group=bbGroup)
+bbDeviation = input.float(2.0, "BB Deviation", minval=0.1, step=0.1, group=bbGroup)
+
+// ADX Filter
+adxGroup = "ADX Filter"
+useAdxFilter = input.bool(true, "Enable ADX Filter", group=adxGroup)
+adxPeriod = input.int(14, "ADX Period", minval=1, group=adxGroup)
+adxThreshold = input.int(25, "ADX Threshold", minval=1, group=adxGroup)
+
+// Momentum Filter
+momGroup = "Momentum Filter"
+useMomentumFilter = input.bool(true, "Enable Momentum Filter", group=momGroup)
+momentumPeriod = input.int(14, "Momentum Period", minval=1, group=momGroup)
+
+// ══════════════════════════════════════════════════════════════════════════════
+// RISK MANAGEMENT SETTINGS
+// ══════════════════════════════════════════════════════════════════════════════
+
+riskGroup = "Risk Management"
+useStopLoss = input.bool(true, "Use Stop Loss", group=riskGroup)
+stopLossPoints = input.float(20.0, "Stop Loss (Points)", minval=1, group=riskGroup)
+useTakeProfit = input.bool(true, "Use Take Profit", group=riskGroup)
+takeProfitPoints = input.float(1000.0, "Take Profit (Points)", minval=1, group=riskGroup)
+
+// Trailing Stop Settings
+trailGroup = "Trailing Stop"
+useTrailingStop = input.bool(true, "Enable Trailing Stop", group=trailGroup)
+trailMode = input.string("ATR", "Trailing Mode", options=["Fixed", "Percentage", "ATR"], group=trailGroup)
+trailDistance = input.float(1.5, "Trail Distance/Multiplier", minval=0.1, step=0.1, group=trailGroup)
+trailStep = input.float(10.0, "Trail Step (Points)", minval=1, group=trailGroup)
+trailAtrPeriod = input.int(21, "Trail ATR Period", minval=1, group=trailGroup)
+trailAtrMultiplier = input.float(1.5, "Trail ATR Multiplier", minval=0.1, step=0.1, group=trailGroup)
+
+// Breakeven Settings
+beGroup = "Breakeven"
+useBreakeven = input.bool(true, "Enable Breakeven", group=beGroup)
+breakevenTrigger = input.float(50.0, "Breakeven Trigger (Points)", minval=1, group=beGroup)
+breakevenOffset = input.float(5.0, "Breakeven Offset (Points)", minval=0, group=beGroup)
+
+// Partial Take Profit Settings
+partialGroup = "Partial Take Profits"
+usePartialTp = input.bool(false, "Enable Partial Take Profits", group=partialGroup)
+tp1Points = input.float(90.0, "TP1 Points", minval=1, group=partialGroup)
+tp1Percent = input.float(30.0, "TP1 Close %", minval=1, maxval=100, group=partialGroup)
+tp2Points = input.float(180.0, "TP2 Points", minval=1, group=partialGroup)
+tp2Percent = input.float(40.0, "TP2 Close %", minval=1, maxval=100, group=partialGroup)
+tp3Points = input.float(270.0, "TP3 Points", minval=1, group=partialGroup)
+tp3Percent = input.float(30.0, "TP3 Close %", minval=1, maxval=100, group=partialGroup)
+
+// Martingale Settings
+martGroup = "Martingale"
+useMartingale = input.bool(false, "Enable Martingale", group=martGroup)
+martMultiplier = input.float(2.0, "Martingale Multiplier", minval=1.0, step=0.1, group=martGroup)
+martMaxLevels = input.int(5, "Max Martingale Levels", minval=1, maxval=10, group=martGroup)
+
+// ══════════════════════════════════════════════════════════════════════════════
+// TIME FILTER SETTINGS
+// ══════════════════════════════════════════════════════════════════════════════
+
+timeGroup = "Time Filter"
+useTimeFilter = input.bool(false, "Enable Time Filter", group=timeGroup)
+startHour = input.int(8, "Start Hour (UTC)", minval=0, maxval=23, group=timeGroup)
+startMinute = input.int(0, "Start Minute", minval=0, maxval=59, group=timeGroup)
+endHour = input.int(20, "End Hour (UTC)", minval=0, maxval=23, group=timeGroup)
+endMinute = input.int(0, "End Minute", minval=0, maxval=59, group=timeGroup)
+
+// ══════════════════════════════════════════════════════════════════════════════
+// INDICATOR CALCULATIONS
+// ══════════════════════════════════════════════════════════════════════════════
+
+// RSI
+rsiValue = ta.rsi(close, rsiPeriod)
+isRsiOversold = rsiValue < rsiOversold
+isRsiOverbought = rsiValue > rsiOverbought
+
+// EMA for Trend Filter
+emaValue = ta.ema(close, emaPeriod)
+priceAboveEma = close > emaValue
+priceBelowEma = close < emaValue
+
+// ATR
+atrValue = ta.atr(atrPeriod)
+atrTrailValue = ta.atr(trailAtrPeriod)
+isAtrValid = atrValue > atrMinThreshold
+
+// MACD
+[macdLine, signalLine, histLine] = ta.macd(close, macdFast, macdSlow, macdSignal)
+isMacdBullish = macdLine > signalLine
+isMacdBearish = macdLine < signalLine
+
+// Stochastic
+stochKValue = ta.stoch(close, high, low, stochK)
+stochDValue = ta.sma(stochKValue, stochD)
+isStochOversold = stochKValue < stochOversold
+isStochOverbought = stochKValue > stochOverbought
+
+// Moving Averages for Crossover
+maFast = maType == "SMA" ? ta.sma(close, maFastPeriod) : ta.ema(close, maFastPeriod)
+maSlow = maType == "SMA" ? ta.sma(close, maSlowPeriod) : ta.ema(close, maSlowPeriod)
+maBullishCross = ta.crossover(maFast, maSlow)
+maBearishCross = ta.crossunder(maFast, maSlow)
+
+// Bollinger Bands
+[bbMiddle, bbUpper, bbLower] = ta.bb(close, bbPeriod, bbDeviation)
+bbBullishBreakout = close > bbUpper
+bbBearishBreakout = close < bbLower
+
+// ADX - using custom calculation (DMI-based)
+calcAdx(len) =>
+    up = ta.change(high)
+    down = -ta.change(low)
+    plusDM = na(up) ? na : (up > down and up > 0 ? up : 0)
+    minusDM = na(down) ? na : (down > up and down > 0 ? down : 0)
+    trur = ta.rma(ta.tr, len)
+    plusDI = 100 * ta.rma(plusDM, len) / trur
+    minusDI = 100 * ta.rma(minusDM, len) / trur
+    dx = 100 * math.abs(plusDI - minusDI) / (plusDI + minusDI)
+    ta.rma(dx, len)
+
+adxValue = calcAdx(adxPeriod)
+isAdxStrong = adxValue > adxThreshold
+
+// Momentum
+momentumValue = ta.mom(close, momentumPeriod)
+isMomentumBullish = momentumValue > 0
+isMomentumBearish = momentumValue < 0
+
+// ══════════════════════════════════════════════════════════════════════════════
+// TIME FILTER
+// ══════════════════════════════════════════════════════════════════════════════
+
+currentHour = hour(time, "UTC")
+currentMinute = minute(time, "UTC")
+currentTimeMinutes = currentHour * 60 + currentMinute
+startTimeMinutes = startHour * 60 + startMinute
+endTimeMinutes = endHour * 60 + endMinute
+
+isWithinTradingHours = not useTimeFilter or (currentTimeMinutes >= startTimeMinutes and currentTimeMinutes <= endTimeMinutes)
+
+// ══════════════════════════════════════════════════════════════════════════════
+// SIGNAL GENERATION
+// ══════════════════════════════════════════════════════════════════════════════
+
+// Primary Buy Signals (at least one must be true)
+primaryBuySignal = false
+if useRsiSignal and isRsiOversold
+    primaryBuySignal := true
+if useMaCrossover and maBullishCross
+    primaryBuySignal := true
+if useBbBreakout and bbBullishBreakout
+    primaryBuySignal := true
+
+// Primary Sell Signals (at least one must be true)
+primarySellSignal = false
+if useRsiSignal and isRsiOverbought
+    primarySellSignal := true
+if useMaCrossover and maBearishCross
+    primarySellSignal := true
+if useBbBreakout and bbBearishBreakout
+    primarySellSignal := true
+
+// Secondary Filters for Buy (all enabled filters must pass)
+secondaryBuyFilter = true
+if useEmaFilter and not priceAboveEma
+    secondaryBuyFilter := false
+if useAtrFilter and not isAtrValid
+    secondaryBuyFilter := false
+if useMacdFilter and not isMacdBullish
+    secondaryBuyFilter := false
+if useStochFilter and not isStochOversold
+    secondaryBuyFilter := false
+if useAdxFilter and not isAdxStrong
+    secondaryBuyFilter := false
+if useMomentumFilter and not isMomentumBullish
+    secondaryBuyFilter := false
+
+// Secondary Filters for Sell (all enabled filters must pass)
+secondarySellFilter = true
+if useEmaFilter and not priceBelowEma
+    secondarySellFilter := false
+if useAtrFilter and not isAtrValid
+    secondarySellFilter := false
+if useMacdFilter and not isMacdBearish
+    secondarySellFilter := false
+if useStochFilter and not isStochOverbought
+    secondarySellFilter := false
+if useAdxFilter and not isAdxStrong
+    secondarySellFilter := false
+if useMomentumFilter and not isMomentumBearish
+    secondarySellFilter := false
+
+// Final Signal
+buySignal = primaryBuySignal and secondaryBuyFilter and isWithinTradingHours
+sellSignal = primarySellSignal and secondarySellFilter and isWithinTradingHours
+
+// ══════════════════════════════════════════════════════════════════════════════
+// POSITION MANAGEMENT VARIABLES
+// ══════════════════════════════════════════════════════════════════════════════
+
+var float entryPrice = na
+var float currentStopLoss = na
+var float currentTakeProfit = na
+var int consecutiveLosses = 0
+var bool tp1Hit = false
+var bool tp2Hit = false
+var bool tp3Hit = false
+var bool breakevenActivated = false
+
+// Point value calculation (adjust based on instrument)
+pointValue = syminfo.mintick
+
+// ══════════════════════════════════════════════════════════════════════════════
+// MARTINGALE LOT SIZE CALCULATION
+// ══════════════════════════════════════════════════════════════════════════════
+
+calcMartingaleLotSize() =>
+    if useMartingale
+        level = math.min(consecutiveLosses, martMaxLevels)
+        math.pow(martMultiplier, level)
+    else
+        1.0
+
+lotMultiplier = calcMartingaleLotSize()
+
+// ══════════════════════════════════════════════════════════════════════════════
+// ENTRY LOGIC
+// ══════════════════════════════════════════════════════════════════════════════
+
+// Calculate SL/TP values
+slValue = stopLossPoints * pointValue
+tpValue = takeProfitPoints * pointValue
+
+// Long Entry
+if buySignal and strategy.position_size == 0
+    entryPrice := close
+    currentStopLoss := useStopLoss ? close - slValue : na
+    currentTakeProfit := useTakeProfit ? close + tpValue : na
+    tp1Hit := false
+    tp2Hit := false
+    tp3Hit := false
+    breakevenActivated := false
+
+    strategy.entry("Long", strategy.long)
+    if useStopLoss or useTakeProfit
+        strategy.exit("Long Exit", "Long", stop=currentStopLoss, limit=currentTakeProfit)
+
+// Short Entry
+if sellSignal and strategy.position_size == 0
+    entryPrice := close
+    currentStopLoss := useStopLoss ? close + slValue : na
+    currentTakeProfit := useTakeProfit ? close - tpValue : na
+    tp1Hit := false
+    tp2Hit := false
+    tp3Hit := false
+    breakevenActivated := false
+
+    strategy.entry("Short", strategy.short)
+    if useStopLoss or useTakeProfit
+        strategy.exit("Short Exit", "Short", stop=currentStopLoss, limit=currentTakeProfit)
+
+// ══════════════════════════════════════════════════════════════════════════════
+// TRAILING STOP LOGIC
+// ══════════════════════════════════════════════════════════════════════════════
+
+if useTrailingStop and strategy.position_size != 0 and not na(entryPrice)
+    trailDist = 0.0
+
+    if trailMode == "Fixed"
+        trailDist := trailDistance * pointValue
+    else if trailMode == "Percentage"
+        profitPoints = strategy.position_size > 0 ? close - entryPrice : entryPrice - close
+        trailDist := profitPoints * (trailDistance / 100)
+    else if trailMode == "ATR"
+        trailDist := atrTrailValue * trailAtrMultiplier
+
+    // Long position trailing
+    if strategy.position_size > 0
+        newStopLoss = close - trailDist
+        if na(currentStopLoss) or newStopLoss > currentStopLoss + (trailStep * pointValue)
+            currentStopLoss := newStopLoss
+            strategy.exit("Long Trail", "Long", stop=currentStopLoss, limit=currentTakeProfit)
+
+    // Short position trailing
+    if strategy.position_size < 0
+        newStopLoss = close + trailDist
+        if na(currentStopLoss) or newStopLoss < currentStopLoss - (trailStep * pointValue)
+            currentStopLoss := newStopLoss
+            strategy.exit("Short Trail", "Short", stop=currentStopLoss, limit=currentTakeProfit)
+
+// ══════════════════════════════════════════════════════════════════════════════
+// BREAKEVEN LOGIC
+// ══════════════════════════════════════════════════════════════════════════════
+
+if useBreakeven and strategy.position_size != 0 and not na(entryPrice) and not breakevenActivated
+    beTrigger = breakevenTrigger * pointValue
+    beOffset = breakevenOffset * pointValue
+
+    // Long position breakeven
+    if strategy.position_size > 0 and close >= entryPrice + beTrigger
+        currentStopLoss := entryPrice + beOffset
+        breakevenActivated := true
+        strategy.exit("Long BE", "Long", stop=currentStopLoss, limit=currentTakeProfit)
+
+    // Short position breakeven
+    if strategy.position_size < 0 and close <= entryPrice - beTrigger
+        currentStopLoss := entryPrice - beOffset
+        breakevenActivated := true
+        strategy.exit("Short BE", "Short", stop=currentStopLoss, limit=currentTakeProfit)
+
+// ══════════════════════════════════════════════════════════════════════════════
+// PARTIAL TAKE PROFIT LOGIC
+// ══════════════════════════════════════════════════════════════════════════════
+
+if usePartialTp and strategy.position_size != 0 and not na(entryPrice)
+    tp1Value = tp1Points * pointValue
+    tp2Value = tp2Points * pointValue
+    tp3Value = tp3Points * pointValue
+
+    // Long position partial TPs
+    if strategy.position_size > 0
+        if not tp1Hit and close >= entryPrice + tp1Value
+            strategy.close("Long", comment="TP1", qty_percent=tp1Percent)
+            tp1Hit := true
+        if not tp2Hit and close >= entryPrice + tp2Value
+            strategy.close("Long", comment="TP2", qty_percent=tp2Percent)
+            tp2Hit := true
+        if not tp3Hit and close >= entryPrice + tp3Value
+            strategy.close("Long", comment="TP3", qty_percent=tp3Percent)
+            tp3Hit := true
+
+    // Short position partial TPs
+    if strategy.position_size < 0
+        if not tp1Hit and close <= entryPrice - tp1Value
+            strategy.close("Short", comment="TP1", qty_percent=tp1Percent)
+            tp1Hit := true
+        if not tp2Hit and close <= entryPrice - tp2Value
+            strategy.close("Short", comment="TP2", qty_percent=tp2Percent)
+            tp2Hit := true
+        if not tp3Hit and close <= entryPrice - tp3Value
+            strategy.close("Short", comment="TP3", qty_percent=tp3Percent)
+            tp3Hit := true
+
+// ══════════════════════════════════════════════════════════════════════════════
+// OPPOSITE SIGNAL EXIT
+// ══════════════════════════════════════════════════════════════════════════════
+
+// Close long on sell signal
+if strategy.position_size > 0 and sellSignal
+    strategy.close("Long", comment="Opposite Signal")
+
+// Close short on buy signal
+if strategy.position_size < 0 and buySignal
+    strategy.close("Short", comment="Opposite Signal")
+
+// ══════════════════════════════════════════════════════════════════════════════
+// TRACK CONSECUTIVE LOSSES (for Martingale)
+// ══════════════════════════════════════════════════════════════════════════════
+
+if useMartingale
+    if strategy.closedtrades > 0
+        lastTradeProfit = strategy.closedtrades.profit(strategy.closedtrades - 1)
+        if lastTradeProfit < 0
+            consecutiveLosses := consecutiveLosses + 1
+        else
+            consecutiveLosses := 0
+
+// ══════════════════════════════════════════════════════════════════════════════
+// VISUAL ELEMENTS
+// ══════════════════════════════════════════════════════════════════════════════
+
+// Plot Moving Averages
+plot(useMaCrossover ? maFast : na, "Fast MA", color=color.blue, linewidth=1)
+plot(useMaCrossover ? maSlow : na, "Slow MA", color=color.orange, linewidth=1)
+
+// Plot EMA Trend Filter
+plot(useEmaFilter ? emaValue : na, "EMA Filter", color=color.purple, linewidth=2)
+
+// Plot Bollinger Bands
+plot(useBbBreakout ? bbUpper : na, "BB Upper", color=color.gray)
+plot(useBbBreakout ? bbMiddle : na, "BB Middle", color=color.gray)
+plot(useBbBreakout ? bbLower : na, "BB Lower", color=color.gray)
+
+// Fill between BB
+fill(plot(useBbBreakout ? bbUpper : na, display=display.none), plot(useBbBreakout ? bbLower : na, display=display.none), color=color.new(color.gray, 90))
+
+// Plot Stop Loss and Take Profit lines
+plot(strategy.position_size != 0 ? currentStopLoss : na, "Stop Loss", color=color.red, style=plot.style_linebr, linewidth=2)
+plot(strategy.position_size != 0 ? currentTakeProfit : na, "Take Profit", color=color.green, style=plot.style_linebr, linewidth=2)
+
+// Signal markers
+plotshape(buySignal and strategy.position_size == 0, "Buy Signal", shape.triangleup, location.belowbar, color.green, size=size.small)
+plotshape(sellSignal and strategy.position_size == 0, "Sell Signal", shape.triangledown, location.abovebar, color.red, size=size.small)
+
+// Background color for trading hours
+bgcolor(useTimeFilter and isWithinTradingHours ? color.new(color.green, 95) : na)
+
+// ══════════════════════════════════════════════════════════════════════════════
+// INFORMATION TABLE
+// ══════════════════════════════════════════════════════════════════════════════
+
+var table infoTable = table.new(position.top_right, 2, 12, bgcolor=color.new(color.black, 80), frame_color=color.gray, frame_width=1)
+
+if barstate.islast
+    table.cell(infoTable, 0, 0, "AK47 Hybrid", text_color=color.white, text_size=size.normal)
+    table.cell(infoTable, 1, 0, "Status", text_color=color.white, text_size=size.normal)
+
+    table.cell(infoTable, 0, 1, "RSI", text_color=color.white)
+    table.cell(infoTable, 1, 1, str.tostring(rsiValue, "#.##"), text_color=isRsiOversold ? color.green : isRsiOverbought ? color.red : color.white)
+
+    table.cell(infoTable, 0, 2, "ADX", text_color=color.white)
+    table.cell(infoTable, 1, 2, str.tostring(adxValue, "#.##"), text_color=isAdxStrong ? color.green : color.white)
+
+    table.cell(infoTable, 0, 3, "MACD", text_color=color.white)
+    table.cell(infoTable, 1, 3, isMacdBullish ? "Bullish" : "Bearish", text_color=isMacdBullish ? color.green : color.red)
+
+    table.cell(infoTable, 0, 4, "Momentum", text_color=color.white)
+    table.cell(infoTable, 1, 4, str.tostring(momentumValue, "#.##"), text_color=isMomentumBullish ? color.green : color.red)
+
+    table.cell(infoTable, 0, 5, "Stochastic", text_color=color.white)
+    table.cell(infoTable, 1, 5, str.tostring(stochKValue, "#.##"), text_color=isStochOversold ? color.green : isStochOverbought ? color.red : color.white)
+
+    table.cell(infoTable, 0, 6, "ATR", text_color=color.white)
+    table.cell(infoTable, 1, 6, str.tostring(atrValue, "#.#####"), text_color=isAtrValid ? color.green : color.white)
+
+    table.cell(infoTable, 0, 7, "Position", text_color=color.white)
+    posText = strategy.position_size > 0 ? "LONG" : strategy.position_size < 0 ? "SHORT" : "FLAT"
+    posColor = strategy.position_size > 0 ? color.green : strategy.position_size < 0 ? color.red : color.white
+    table.cell(infoTable, 1, 7, posText, text_color=posColor)
+
+    table.cell(infoTable, 0, 8, "BE Active", text_color=color.white)
+    table.cell(infoTable, 1, 8, breakevenActivated ? "Yes" : "No", text_color=breakevenActivated ? color.green : color.white)
+
+    if useMartingale
+        table.cell(infoTable, 0, 9, "Mart Level", text_color=color.white)
+        table.cell(infoTable, 1, 9, str.tostring(consecutiveLosses), text_color=consecutiveLosses > 0 ? color.orange : color.white)
+
+// ══════════════════════════════════════════════════════════════════════════════
+// ALERTS
+// ══════════════════════════════════════════════════════════════════════════════
+
+alertcondition(buySignal and strategy.position_size == 0, "AK47 Buy Signal", "AK47 Hybrid: Buy Signal Detected")
+alertcondition(sellSignal and strategy.position_size == 0, "AK47 Sell Signal", "AK47 Hybrid: Sell Signal Detected")
+alertcondition(breakevenActivated, "Breakeven Activated", "AK47 Hybrid: Breakeven Stop Activated")
